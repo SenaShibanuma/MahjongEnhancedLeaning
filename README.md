@@ -1,0 +1,2 @@
+# MahjongEnhancedLeaning
+リーチ麻雀を強化学習するための奴
