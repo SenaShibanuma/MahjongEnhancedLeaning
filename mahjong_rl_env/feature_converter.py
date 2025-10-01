@@ -20,14 +20,15 @@ def convert_tile_136_to_34(tile_136_id):
 
 def _encode_hand_tiles(hand_136):
     """手牌を34種の枚数ベクトル (0-4) に変換"""
-    return TilesConverter.to_34_array(hand_136)
+    # mahjong.tile.TilesConverterに依存
+    hand_34 = np.zeros(TILE_34_COUNT, dtype=np.int8)
+    for tile_136 in hand_136:
+        hand_34[convert_tile_136_to_34(tile_136)] += 1
+    return hand_34
 
 def _generate_event_vector(event, current_game_state, rl_agent_id):
     """
     単一のゲームイベントとゲーム状態から、固定長のイベントベクトルを生成する。
-    
-    【実装方針】: あなたの仕様書 (AgentInterfaceSpecification) の EventVector に基づく。
-    この関数は、イベントの種類にかかわらず、256次元のベクトルを返す必要があります。
     """
     
     vector = np.zeros(EVENT_VECTOR_DIM, dtype=np.float32)
@@ -71,11 +72,8 @@ def _generate_event_vector(event, current_game_state, rl_agent_id):
         for tile_136 in player_river:
             visible_counts[convert_tile_136_to_34(tile_136)] += 1
             
-    # ★修正: 副露牌 (melds) の加算
-    for player_id, player_melds in enumerate(current_game_state['melds']):
-        # RLエージェント自身の手牌は、手牌ベクトル (7) で考慮されるため、ここでは含めない。
-        # ただし、副露面子は既に手牌から除かれている前提のため、すべて含める。
-        # mahjong.Meldオブジェクトにはtilesプロパティがある
+    # 副露牌 (melds) の加算
+    for player_melds in current_game_state['melds']:
         for meld in player_melds:
             for tile_136 in meld.tiles:
                 visible_counts[convert_tile_136_to_34(tile_136)] += 1
@@ -97,21 +95,19 @@ def _generate_event_vector(event, current_game_state, rl_agent_id):
     vector[offset:offset + TILE_34_COUNT] = my_hand_34
     offset += TILE_34_COUNT
 
-    # 8. 自分のシャンテン数 (このイベントの前の状態を反映しているはず)
-    # Note: MahjongEnvでシャンテン数が状態に保存されていないため、ここではダミー
-    shanten = 9
-    # try:
-    #     shanten = self.shanten_calculator.calculate_shanten(_encode_hand_tiles(my_hand_136))
-    # except:
-    #     pass
+    # 8. 自分のシャンテン数 
+    # Note: Environment.pyではShantenオブジェクトを使っているため、ここではダミー値を入れない。
+    # 必要な場合は、ここで Shanten().calculate_shanten(_encode_hand_tiles(my_hand_136)) を実行する。
+    # Environmentで計算されたshanten値がstateにないため、暫定的に9で固定
+    shanten = current_game_state.get('shanten', [9]*4)[rl_agent_id]
     vector[offset] = shanten / 9.0
     offset += 1
     
     # ------------------------------------------------------------
-    # C. イベント固有情報のエンコーディング (仕様書 EventTypes)
+    # C. イベント固有情報のエンコーディング 
     # ------------------------------------------------------------
     
-    EVENT_ID_MAP = {'INIT': 0, 'DRAW': 1, 'DISCARD': 2, 'MELD': 3, 'RIICHI': 4, 'AGARI': 5, 'RYUKYOKU': 6, 'GAME_START': 7}
+    EVENT_ID_MAP = {'INIT': 0, 'DRAW': 1, 'DISCARD': 2, 'MELD': 3, 'RIICHI_DECLARED': 4, 'AGARI': 5, 'RYUKYOKU': 6, 'GAME_START': 7}
     EVENT_TYPE_ONE_HOT_DIM = 8 
     
     # 9. イベントタイプ One-Hot
@@ -121,7 +117,7 @@ def _generate_event_vector(event, current_game_state, rl_agent_id):
     offset += EVENT_TYPE_ONE_HOT_DIM
     
     # 10. 牌情報 (打牌/ツモ牌)
-    tile_136 = event.get('tile') # DISCARD/DRAW イベント用
+    tile_136 = event.get('tile')
     if tile_136 is not None:
         tile_34 = convert_tile_136_to_34(tile_136)
         vector[offset + tile_34] = 1.0 # 34次元One-Hot
@@ -133,9 +129,11 @@ def _generate_event_vector(event, current_game_state, rl_agent_id):
     offset += 1
     
     # 喰いタン/赤ドラフラグ (INIT/GAME_STARTイベント用)
-    if event['event_id'] == 'GAME_START':
-        vector[offset] = event['rules'].get('has_kuitan', 0.0)
-        vector[offset+1] = event['rules'].get('has_aka_dora', 0.0)
+    if event['event_id'] == 'INIT':
+        # ルール情報はgame_stateから取得
+        rules = current_game_state.get('rules', {})
+        vector[offset] = rules.get('has_kuitan', 1.0) # デフォルトで喰いタンあり
+        vector[offset+1] = rules.get('has_aka_dora', 1.0) # デフォルトで赤ドラあり
     offset += 2
     
     # ... 残り次元 (256 - offset) はゼロパディング
