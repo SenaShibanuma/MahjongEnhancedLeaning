@@ -5,11 +5,13 @@ from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 
 # プロジェクトルートからモジュールをインポート
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vectorizer import (
-    get_context_vector, TILE_34_COUNT, TOTAL_ACTION_DIM,
+    get_context_vector, TOTAL_ACTION_DIM,
     CONTEXT_MAX_LEN, EVENT_VECTOR_DIM
 )
-from .mahjong_game_logic import MahjongGameLogic # ゲーム進行ロジックを分離
+from mahjong_rl_env.mahjong_game_logic import MahjongGameLogic # ゲーム進行ロジックを分離
 
 class MahjongPyEnvironment(py_environment.PyEnvironment):
     """TF-Agentsと互換性のあるPythonベースの麻雀環境"""
@@ -20,13 +22,11 @@ class MahjongPyEnvironment(py_environment.PyEnvironment):
         self.rl_agent_id = self._game.rl_agent_id
 
         # --- 1. 行動の仕様 (Action Spec) を定義 ---
-        # AIが取りうる行動の範囲を定義します。
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(), dtype=np.int32, minimum=0, maximum=TOTAL_ACTION_DIM - 1, name='action'
         )
 
         # --- 2. 観測の仕様 (Observation Spec) を定義 ---
-        # AIに渡される観測データの型と形状を定義します。
         self._observation_spec = {
             'context': array_spec.ArraySpec(
                 shape=(CONTEXT_MAX_LEN, EVENT_VECTOR_DIM),
@@ -49,9 +49,7 @@ class MahjongPyEnvironment(py_environment.PyEnvironment):
     def _reset(self):
         """新しい局を開始"""
         self._game.reset()
-        # RLエージェントの番までBotターンを進める
-        self._game.simulate_bot_turns()
-
+        self._game.simulate_bot_turns() # RLエージェントの番までBotターンを進める
         obs = self._get_observation()
         return ts.restart(obs)
 
@@ -60,19 +58,13 @@ class MahjongPyEnvironment(py_environment.PyEnvironment):
         if self._game.is_terminated:
             return self.reset()
 
-        # AIの行動をゲーム内で実行し、報酬を得る
         reward = self._game.execute_rl_agent_action(action)
-
-        # AIの次の番までBotターンを進める
         self._game.simulate_bot_turns()
-
         obs = self._get_observation()
 
         if self._game.is_terminated:
-            # ゲームが終了した場合
             return ts.termination(obs, reward)
         else:
-            # ゲームが続く場合
             return ts.transition(obs, reward=reward, discount=1.0)
 
     def _get_observation(self):
@@ -81,3 +73,4 @@ class MahjongPyEnvironment(py_environment.PyEnvironment):
         context = get_context_vector(game_state['events'], self.rl_agent_id)
         mask = self._game.get_action_mask()
         return {'context': context, 'action_mask': mask}
+

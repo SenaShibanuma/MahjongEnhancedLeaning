@@ -1,104 +1,89 @@
-# 🤖 Mahjong-RL-Transformer: 麻雀 AI 強化学習プロジェクト
+pip install -r requirements.txt
+generate_data.py: 天鳳ログを解析し、教師あり学習用のデータセットを生成します。
+a. 事前学習済み重みのロード設定
+b. 強化学習の実行
+tf_agents_environment.py: TF-Agentsのフレームワークに準拠した麻雀環境のラッパー。ゲームロジックとエージェントの間のデータのやり取りを定義します。
 
-本プロジェクトは、**天鳳ログ**で事前学習させた **Transformer モデル**をベースに、**強化学習（Reinforcement Learning, RL）**を用いて自己対戦学習を行うことで、**日本式リーチ麻雀**における最高レベルの戦略獲得を目指すことを目的としています。
+# 🤖 Mahjong-RL-Transformer: 麻雀AI強化学習プロジェクト (TensorFlow/TF-Agents版)
 
-強化学習環境には **Gymnasium** を採用し、牌理計算には高精度な **`mahjong` ライブラリ**を利用しています。学習は **Google Colab** の GPU 環境で効率的に実行できるように設計されています。
+本プロジェクトは、天鳳ログで事前学習させた Transformer モデルをベースに、**強化学習（Reinforcement Learning, RL）**を用いて自己対戦学習を行うことで、日本式リーチ麻雀における最高レベルの戦略獲得を目指します。
 
 ---
 
 ## 🛠️ 技術スタック
 
-| カテゴリ | コンポーネント | 目的 |
-| :--- | :--- | :--- |
-| **RL フレームワーク** | `Stable Baselines3 (PPO)` | 強化学習アルゴリズムの実行 |
-| **AI モデル** | `PyTorch` / `Transformer` | 事前学習済み知識の活用と行動決定 |
-| **環境インターフェース** | `Gymnasium` | RL エージェントと環境の連携 |
-| **麻雀計算エンジン** | `mahjong` (v1.3.0) | 点数計算、向聴数計算など |
-| **実行環境** | `Google Colab (GPU)` | 高速な学習のための環境 |
+| カテゴリ         | コンポーネント         | 目的                                      |
+|------------------|-----------------------|-------------------------------------------|
+| MLフレームワーク | TensorFlow            | 事前学習・強化学習のモデル構築・学習      |
+| RLライブラリ     | TF-Agents             | 強化学習アルゴリズム (PPO) の実行         |
+| AIモデル         | Transformer           | 状況判断と行動決定の中核                  |
+| 麻雀計算エンジン | mahjong               | 点数計算、向聴数計算など                  |
+| 実行環境         | ローカル(GPU)/Colab   | 高速な学習のための環境                    |
 
 ---
 
 ## 📁 ディレクトリ構成
 
-プロジェクトのモジュール化と管理を容易にするための構造です。
-
+```text
 mahjong-rl-transformer/
 ├── data/
 │   ├── tenhou_logs/             # 天鳳の生ログ (.mjlog.gz)
 │   └── processed_data/          # 教師あり学習データ (.pkl)
 ├── mahjong_rl_env/
-│   ├── environment.py           # MahjongEnv (Gymnasium互換の4人AI対戦環境)
-│   ├── feature_converter.py     # 観測情報 (Context/Mask) のベクトル化ロジック
-│   └── rule_checker.py          # (オプション) 行動の合法性チェックの分離
+│   ├── tf_agents_environment.py # TF-Agents互換の麻雀環境
+│   └── mahjong_game_logic.py    # 純粋な麻雀のゲーム進行ロジック
 ├── models/
-│   ├── transformer_model.py     # Transformer モデル構造の定義
-│   └── custom_policy.py         # MaskedTransformerPolicy (Action MaskingとRL統合)
+│   └── tf_agents_policy.py      # TF-Agents用Transformerポリシーネットワーク
 ├── notebooks/
-│   └── Colab_RL_Setup.ipynb     # Colabでの学習実行用ノートブック (メイン実行ファイル)
-├── scripts/                     # データ準備、事前学習、RL学習のシェルスクリプト
-├── .gitignore
-└── requirements.txt             # 依存ライブラリ一覧
-
+│   └── (Colabでの実行用ノートブックなど)
+├── vectorizer.py                # 教師あり/強化学習 共通のデータベクトル化
+├── train_transformer.py         # [ステップ1] 天鳳ログでモデルを事前学習
+├── train_rl_tf_agents.py        # [ステップ2] 強化学習でモデルを自己対戦強化
+├── requirements.txt             # 依存ライブラリ一覧
+└── README.md
+```
 
 ---
 
-## 🚀 セットアップと実行手順
+## 🚀 セットアップと学習手順
 
 ### 1. 依存ライブラリのインストール
 
-ローカル環境または Colab の最初のセルで実行します。
-
 ```bash
-# Colab での実行を推奨
-!pip install mahjong gymnasium stable-baselines3[extra] torch numpy
-2. Google Drive のセットアップ (Colab 必須)
-学習済みモデルの永続化と、自作モジュールへのアクセス設定です。
+pip install -r requirements.txt
+```
 
-notebooks/Colab_RL_Setup.ipynb を Colab で開きます。
+### 2. 事前学習 (Supervised Learning)
 
-ノートブック内の手順に従い、Google Drive をマウントし、PROJECT_ROOT パスを設定します。
+1. 天鳳の対戦ログを `data/tenhou_logs/` に配置
+2. 教師あり学習用データセット生成: `generate_data.py`
+3. Transformerモデルの学習: `train_transformer.py`
 
-本リポジトリの全ファイルを、設定した PROJECT_ROOT ディレクトリ内に配置します。
+### 3. 強化学習 (Reinforcement Learning)
 
-3. 事前学習済み重みのロード
-RL 学習を開始する前に、Transformer モデルに天鳳ログで獲得した知識を注入します。
+1. 事前学習済みモデルの重みを `train_rl_tf_agents.py` でロード
+    ```python
+    # train_rl_tf_agents.py
+    PRETRAINED_MODEL_PATH = 'path/to/your/pretrained_transformer.keras' # 事前学習済みモデルのパス
+    if os.path.exists(PRETRAINED_MODEL_PATH):
+        actor_critic_net.load_weights(PRETRAINED_MODEL_PATH, by_name=True, skip_mismatch=True)
+        print(f"✅ Pre-trained weights loaded from {PRETRAINED_MODEL_PATH}")
+    ```
+2. 強化学習の実行
+    ```bash
+    python train_rl_tf_agents.py
+    ```
 
-ファイル: models/custom_policy.py
+---
 
-場所: TransformerFeatureExtractor クラスの __init__ メソッド内
+## ⚙️ 主要モジュールの機能概要
 
-Python
+### vectorizer.py
+教師あり学習・強化学習で同一の観測データを生成する共通モジュール。ゲームイベント履歴をTransformerが解釈できる固定長ベクトルに変換。
 
-        # ★事前学習済みモデルの重みロード (ここに実装)
-        try:
-            # 事前学習済み重みファイルのパスを適切に指定
-            pretrained_weights = th.load("/content/gdrive/MyDrive/mahjong-rl-transformer/pretrain_weights.pth")
-            self.transformer.load_state_dict(pretrained_weights, strict=False) 
-            print("Pre-trained Transformer weights loaded successfully.")
-        except FileNotFoundError:
-            print("Pre-trained weights not found. Starting RL training from scratch.")
-4. 強化学習の実行
-Colab_RL_Setup.ipynb ノートブックを実行します。
+### mahjong_rl_env/
+- `tf_agents_environment.py`: TF-Agents準拠の麻雀環境ラッパー。ゲームロジックとエージェント間のデータやり取りを定義。
+- `mahjong_game_logic.py`: 純粋な麻雀ルール・状態遷移・報酬計算などを担うクラス。
 
-ノートブックは以下の処理を自動で行います。
-
-MahjongEnv (4人AIセルフプレイ環境) の初期化。
-
-MaskedTransformerPolicy (カスタムポリシー) をPPOに組み込み。
-
-GPU を利用して学習を開始し、TensorBoard でログを記録。
-
-学習終了時、または中断時にモデルを自動保存。
-
-⚙️ 主要モジュールの機能概要
-mahjong_rl_env/environment.py
-セルフプレイ: step メソッド内で、RL エージェントの番が来るまで他家（Bot）に自動で行動を選択させるロジック (_process_opponent_turns) を実装。
-
-報酬計算: 和了・放銃・流局時に mahjong.HandCalculator を使用し、点数移動を正確に報酬 (reward) として返す。
-
-観測構造: {"context": ..., "action_mask": ...} の Dict 構造を返す。
-
-models/custom_policy.py
-TransformerFeatureExtractor: 環境から受け取った時系列データ (context) を Transformer に通し、現在の状態を表す固定長の特徴ベクトルを抽出。
-
-MaskedCategorical: 違法な行動の Logit をマスク (-1e8) し、RL エージェントが常に合法的な行動のみを選択するように強制する。
+### models/tf_agents_policy.py
+`MahjongActorCriticNetwork`: TF-Agents流のTransformerベースネットワーク。事前学習モデルと同じ構造で、方策（Actor）と状態価値（Critic）を出力。Action Masking対応。
