@@ -110,5 +110,9 @@ class MahjongActorCriticNetwork(network.Network):
             value_features = layer(value_features)
         value_prediction = self.value_head(value_features)
 
-        return (masked_logits, value_prediction), network_state
+        # === ▼▼▼ 変更箇所 ▼▼▼ ===
+        # TF-Agentsが期待する形状 (バッチサイズ,) に合わせるため、最後の次元を削除
+        value_prediction = tf.squeeze(value_prediction, axis=-1)
+        # === ▲▲▲ 変更ここまで ▲▲▲ ===
 
+        return (masked_logits, value_prediction), network_state
