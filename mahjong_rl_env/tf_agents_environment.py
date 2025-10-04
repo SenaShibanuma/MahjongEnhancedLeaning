@@ -4,41 +4,35 @@ from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 
-# プロジェクトルートからモジュールをインポート
-import sys, os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 循環参照を避けるため、必要なものだけをインポート
 from vectorizer import (
-    get_context_vector, TOTAL_ACTION_DIM,
-    CONTEXT_MAX_LEN, EVENT_VECTOR_DIM
+    get_observation_vector,
+    ACTION_SPACE,
+    EVENT_VECTOR_DIM,
+    CONTEXT_MAX_LEN
 )
-from mahjong_rl_env.mahjong_game_logic import MahjongGameLogic # ゲーム進行ロジックを分離
+from mahjong_rl_env.mahjong_game_logic import MahjongGameLogic # ゲーム進行ロ_ジックを分離
 
 class MahjongPyEnvironment(py_environment.PyEnvironment):
-    """TF-Agentsと互換性のあるPythonベースの麻雀環境"""
-
+    """TF-Agentsと連携するためのPython環境ラッパー"""
     def __init__(self):
         super().__init__()
-        self._game = MahjongGameLogic() # 実際の麻雀ロジックを持つインスタンス
-        self.rl_agent_id = self._game.rl_agent_id
+        self._game = MahjongGameLogic()
 
-        # --- 1. 行動の仕様 (Action Spec) を定義 ---
+        # 1. 行動空間の定義 (AIの出力)
         self._action_spec = array_spec.BoundedArraySpec(
-            shape=(), dtype=np.int32, minimum=0, maximum=TOTAL_ACTION_DIM - 1, name='action'
-        )
+            shape=(), dtype=np.int32, minimum=0, maximum=len(ACTION_SPACE) - 1, name='action')
 
-        # --- 2. 観測の仕様 (Observation Spec) を定義 ---
+        # 2. 観測空間の定義 (AIへの入力)
         self._observation_spec = {
-            'context': array_spec.ArraySpec(
-                shape=(CONTEXT_MAX_LEN, EVENT_VECTOR_DIM),
-                dtype=np.float32,
-                name='context'
-            ),
-            'action_mask': array_spec.ArraySpec(
-                shape=(TOTAL_ACTION_DIM,),
-                dtype=np.int8,
-                name='action_mask'
-            )
+            'observation': array_spec.BoundedArraySpec(
+                shape=(CONTEXT_MAX_LEN, EVENT_VECTOR_DIM), dtype=np.float32, name='observation'),
+            # --- 修正箇所: データ型を int8 から int32 に変更 ---
+            'action_mask': array_spec.BoundedArraySpec(
+                shape=(len(ACTION_SPACE),), dtype=np.int32, name='action_mask')
         }
+        self._state = self._game.reset()
+        self._episode_ended = False
 
     def action_spec(self):
         return self._action_spec
@@ -47,30 +41,38 @@ class MahjongPyEnvironment(py_environment.PyEnvironment):
         return self._observation_spec
 
     def _reset(self):
-        """新しい局を開始"""
-        self._game.reset()
-        self._game.simulate_bot_turns() # RLエージェントの番までBotターンを進める
-        obs = self._get_observation()
-        return ts.restart(obs)
+        self._state = self._game.reset()
+        self._episode_ended = False
+        return ts.restart(self._get_observation())
 
     def _step(self, action):
-        """AIの行動を受けてゲームを1ステップ進める"""
-        if self._game.is_terminated:
+        if self._episode_ended:
             return self.reset()
 
-        reward = self._game.execute_rl_agent_action(action)
-        self._game.simulate_bot_turns()
-        obs = self._get_observation()
+        # TF-Agentsから受け取った行動をゲームロジックに渡す
+        player_id = self._state['current_player_id']
+        next_state, reward, done, info = self._game.step(player_id, action)
+        self._state = next_state
 
-        if self._game.is_terminated:
-            return ts.termination(obs, reward)
+        if done:
+            self._episode_ended = True
+            # 局が終了した場合、報酬を伴う最終ステップを返す
+            return ts.termination(self._get_observation(), reward)
         else:
-            return ts.transition(obs, reward=reward, discount=1.0)
+            # 局が継続する場合、通常の遷移ステップを返す
+            return ts.transition(self._get_observation(), reward=reward, discount=1.0)
 
     def _get_observation(self):
-        """現在のゲーム状態から観測データを生成"""
-        game_state = self._game.get_state()
-        context = get_context_vector(game_state['events'], self.rl_agent_id)
-        mask = self._game.get_action_mask()
-        return {'context': context, 'action_mask': mask}
+        """現在のゲーム状態から、AIへの観測データを生成する"""
+        player_id = self._state['current_player_id']
+        
+        observation_vector = get_observation_vector(
+            self._game.get_state_for_vectorizer(player_id)
+        )
+        action_mask = self._game.get_action_mask(player_id)
+        
+        return {
+            'observation': observation_vector,
+            'action_mask': action_mask,
+        }
 

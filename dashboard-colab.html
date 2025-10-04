@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>麻雀AI リアルタイムダッシュボード (Colab Connect)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Meiryo, system-ui; }
+        .tile {
+            width: 2.2rem; height: 3rem; line-height: 3rem;
+            border: 1px solid #777; border-radius: 4px;
+            background-color: #f0f0f0; color: #333;
+            text-align: center; font-size: 1.5rem; margin: 2px;
+            display: inline-block; user-select: none;
+        }
+        .tile.red { color: #c00; }
+        .tile.facedown { background-color: #7ab56f; border-color: #5a9a4f; }
+        .river-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; }
+    </style>
+</head>
+<body class="bg-gray-800 text-white p-4">
+
+    <div class="max-w-7xl mx-auto grid grid-cols-3 gap-6">
+        <!-- 左側: ダッシュボード -->
+        <div class="col-span-1 bg-gray-900/50 p-4 rounded-lg">
+            <h2 class="text-2xl font-bold mb-4 border-b border-gray-600 pb-2">学習ステータス</h2>
+            
+            <!-- 接続設定エリア -->
+            <div class="bg-gray-700 p-3 rounded-lg mb-4">
+                <label for="ws-url" class="text-xs text-gray-400">Colab WebSocket URL</label>
+                <div class="flex space-x-2 mt-1">
+                    <input type="text" id="ws-url" placeholder="ws://..." class="w-full bg-gray-800 rounded px-2 py-1 text-sm border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button id="connect-btn" class="px-3 py-1 bg-blue-600 rounded hover:bg-blue-700 text-sm">接続</button>
+                </div>
+            </div>
+
+            <div id="status-light" class="w-4 h-4 rounded-full bg-red-500 mb-4 inline-block"></div>
+            <span id="status-text" class="ml-2">未接続</span>
+            
+            <div class="space-y-4 text-lg">
+                <div><p class="text-gray-400 text-sm">学習ステップ</p><p id="current-step" class="font-mono text-2xl">0</p></div>
+                <div><p class="text-gray-400 text-sm">平均報酬 (直近100局)</p><p id="avg-reward" class="font-mono text-2xl">0.00</p></div>
+                <div><p class="text-gray-400 text-sm">損失 (Loss)</p><p id="loss" class="font-mono text-2xl">0.0000</p></div>
+            </div>
+
+            <h3 class="text-xl font-bold mt-8 mb-4 border-b border-gray-600 pb-2">役 サマリー</h3>
+            <div id="yaku-summary" class="space-y-2 text-sm"><p class="text-gray-500">接続待機中...</p></div>
+        </div>
+
+        <!-- 右側: 牌譜ビューア (変更なし) -->
+        <div class="col-span-2">
+            <h1 class="text-3xl font-bold text-center mb-4">牌譜ビューア</h1>
+            <div class="bg-gray-700 p-4 rounded-lg mb-4 flex items-center space-x-4">
+                <input type="file" id="kifu-input" class="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100">
+                <button id="prev-btn" class="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">＜ 前</button>
+                <button id="next-btn" class="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">次 ＞</button>
+                <span id="turn-info" class="text-lg font-mono">Turn: 0 / 0</span>
+                <span id="event-info" class="text-sm text-gray-300 flex-grow">牌譜ファイルを選択してください</span>
+            </div>
+            <div id="board" class="bg-green-800 border-4 border-yellow-700 p-4 rounded-lg grid grid-cols-3 grid-rows-3 gap-4" style="height: 60vh;">
+                <div class="col-start-2"><div id="p2-river" class="river-grid mx-auto"></div><div id="p2-hand" class="flex justify-center mt-2"></div></div><div class="row-start-2 flex items-center"><div><div id="p1-river" class="river-grid"></div><div id="p1-hand" class="flex flex-col mt-2"></div></div></div><div id="center-info" class="row-start-2 col-start-2 bg-green-900/50 rounded-lg flex flex-col items-center justify-center"><p>ドラ</p><div id="dora-indicator" class="tile"></div><p id="scores" class="mt-4 text-xs"></p></div><div class="row-start-2 col-start-3 flex items-center justify-end"><div><div id="p3-river" class="river-grid"></div><div id="p3-hand" class="flex flex-col mt-2"></div></div></div><div class="col-start-2 row-start-3 self-end"><div id="p0-hand" class="flex justify-center mb-2"></div><div id="p0-river" class="river-grid mx-auto"></div></div>
+            </div>
+            <div id="agari-info" class="mt-4 text-center text-xl font-bold text-yellow-300"></div>
+        </div>
+    </div>
+
+<script>
+    const statusLight = document.getElementById('status-light');
+    const statusText = document.getElementById('status-text');
+    const wsUrlInput = document.getElementById('ws-url');
+    const connectBtn = document.getElementById('connect-btn');
+    let socket;
+
+    connectBtn.addEventListener('click', () => {
+        const url = wsUrlInput.value;
+        if (!url || !url.startsWith('ws://') && !url.startsWith('wss://')) {
+            alert('有効なWebSocket URLを入力してください (例: ws://XXXX.ngrok.io)');
+            return;
+        }
+        connectWebSocket(url);
+    });
+
+    function connectWebSocket(url) {
+        if (socket) { socket.close(); }
+        socket = new WebSocket(url);
+        statusText.textContent = "接続中...";
+
+        socket.onopen = (e) => {
+            statusLight.className = 'w-4 h-4 rounded-full bg-green-500 mb-4 inline-block';
+            statusText.textContent = "接続済み";
+        };
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            document.getElementById('current-step').textContent = data.step;
+            document.getElementById('avg-reward').textContent = data.avg_reward.toFixed(2);
+            document.getElementById('loss').textContent = data.loss.toFixed(4);
+            const yakuSummaryEl = document.getElementById('yaku-summary');
+            yakuSummaryEl.innerHTML = '';
+            if (data.yaku_summary.length > 0) {
+                data.yaku_summary.forEach(([yaku, count]) => {
+                    const p = document.createElement('p'); p.textContent = `${yaku}: ${count}`; yakuSummaryEl.appendChild(p);
+                });
+            } else { yakuSummaryEl.innerHTML = '<p class="text-gray-500">役はまだ記録されていません...</p>'; }
+        };
+        socket.onclose = (event) => {
+            statusLight.className = 'w-4 h-4 rounded-full bg-red-500 mb-4 inline-block';
+            statusText.textContent = "接続が切れました";
+        };
+        socket.onerror = (err) => {
+            statusText.textContent = "接続エラー";
+            console.error("WebSocket Error: ", err);
+        }
+    }
+
+    // (以下、牌譜ビューアのロジックは変更なし)
+    const TILE_MAP={0:'🀇',1:'🀈',2:'🀉',3:'🀊',4:'🀋',5:'🀌',6:'🀍',7:'🀎',8:'🀏',9:'🀙',10:'🀚',11:'🀛',12:'🀜',13:'🀝',14:'🀞',15:'🀟',16:'🀠',17:'🀡',18:'🀐',19:'🀑',20:'🀒',21:'🀓',22:'🀔',23:'🀕',24:'🀖',25:'🀗',26:'🀘',27:'🀀',28:'🀁',29:'🀂',30:'🀃',31:'🀄︎',32:'🀅',33:'🀆'};const AKA_DORA={16:true,52:true,88:true};let kifuEvents=[],currentIndex=-1,oyaPlayer=0;const fileInput=document.getElementById('kifu-input'),prevBtn=document.getElementById('prev-btn'),nextBtn=document.getElementById('next-btn');fileInput.addEventListener('change',e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader;reader.onload=event=>{try{kifuEvents=JSON.parse(event.target.result),currentIndex=0,renderState()}catch(err){alert("ファイルの読み込みに失敗しました。"),console.error(err)}};reader.readAsText(file)});prevBtn.addEventListener('click',()=>{currentIndex>0&&(currentIndex--,renderState())});nextBtn.addEventListener('click',()=>{currentIndex<kifuEvents.length-1&&(currentIndex++,renderState())});function tileIdToHtml(e){const t=Math.floor(e/4),n=AKA_DORA[e]||!1;return`<div class="tile ${n?"red":""}">${TILE_MAP[t]}</div>`}function renderState(){if(0===kifuEvents.length)return;const e=kifuEvents[currentIndex],t=e.hands_136,n=e.rivers;"INIT"===e.event_id&&(oyaPlayer=e.oya);const o=[0,1,2,3];for(let r=0;r<4;r++){const s=o[r],l=document.getElementById(`p${r}-hand`),a=document.getElementById(`p${r}-river`);l.innerHTML="";const d=t[s]||[];0===r?l.innerHTML=d.map(tileIdToHtml).join(""):l.innerHTML=Array(d.length).fill('<div class="tile facedown"></div>').join("");const i=n[s]||[];a.innerHTML=i.map(tileIdToHtml).join("")}document.getElementById("turn-info").textContent=`Turn: ${e.turn} / ${kifuEvents.length-1}`,document.getElementById("event-info").textContent=`Event: ${e.event_id} Player: ${e.player}`;const c=kifuEvents.find(e=>"INIT"===e.event_id);c&&(document.getElementById("dora-indicator").innerHTML=TILE_MAP[Math.floor(c.dora_indicators[0]/4)],document.getElementById("scores").textContent=`Scores: ${c.scores.join(", ")}`);const u=document.getElementById("agari-info");"AGARI"===e.event_id?u.textContent=`和了! Player ${e.player} wins with ${e.yaku.join(", ")} for ${e.score} points.`:u.textContent="",prevBtn.disabled=currentIndex<=0,nextBtn.disabled=currentIndex>=kifuEvents.length-1}
+</script>
+</body>
+</html>
